@@ -201,7 +201,7 @@ class RetrievalAugmentation:
             f"Successfully initialized RetrievalAugmentation with Config {config.log_config()}"
         )
 
-    def add_documents(self, docs):
+    def add_documents(self, docs, make = False):
         """
         Adds documents to the tree and creates a TreeRetriever instance.
 
@@ -216,7 +216,7 @@ class RetrievalAugmentation:
                 # self.add_to_existing(docs)
                 return
 
-        self.tree = self.tree_builder.build_from_text(text=docs)
+        self.tree = self.tree_builder.build_from_text(text=docs, make = make)
         self.retriever = TreeRetriever(self.tree_retriever_config, self.tree)
 
     def retrieve(
@@ -291,12 +291,14 @@ class RetrievalAugmentation:
             question, start_layer, num_layers, top_k, max_tokens, collapse_tree, True
         )
 
+        print("context:", context)
+        
         answer = self.qa_model.answer_question(context, question)
 
         if return_layer_information:
             return answer, layer_information
 
-        return answer
+        return answer, context
 
     def save(self, path):
         if self.tree is None:

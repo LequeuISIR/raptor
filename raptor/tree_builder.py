@@ -156,7 +156,8 @@ class TreeBuilder:
         )
 
     def create_node(
-        self, index: int, text: str, children_indices: Optional[Set[int]] = None
+        self, index: int, text: str, children_indices: Optional[Set[int]] = None, 
+        context_size: Optional[int] = 4, nodes_number: Optional[int] = 0
     ) -> Tuple[int, Node]:
         """Creates a new node with the given index, text, and (optionally) children indices.
 
@@ -169,14 +170,21 @@ class TreeBuilder:
         Returns:
             Tuple[int, Node]: A tuple containing the index and the newly created node.
         """
+        assert context_size % 2 == 0, ("the context size should be even, but %i was given" % context_size)
+
         if children_indices is None:
             children_indices = set()
+
+        split = text.split(":", 1)
+        speaker = split[0] if len(split) > 1 else "Unknown"
+        text = split[1] if len(split) > 1 else split[0]
 
         embeddings = {
             model_name: model.create_embedding(text)
             for model_name, model in self.embedding_models.items()
         }
-        return (index, Node(text, index, children_indices, embeddings))
+        context_nodes = set(range(max(0, index - context_size//2), index)) | set(range(index+1, min(nodes_number, index+1 + context_size//2)))  
+        return (index, Node(text, index, children_indices, embeddings, speaker, context_nodes))
 
     def create_embedding(self, text) -> List[float]:
         """
@@ -246,7 +254,7 @@ class TreeBuilder:
         """
         with ThreadPoolExecutor() as executor:
             future_nodes = {
-                executor.submit(self.create_node, index, text): (index, text)
+                executor.submit(self.create_node, index, text, nodes_number=len(chunks)): (index, text)
                 for index, text in enumerate(chunks)
             }
 
@@ -257,7 +265,7 @@ class TreeBuilder:
 
         return leaf_nodes
 
-    def build_from_text(self, text: str, use_multithreading: bool = True) -> Tree:
+    def build_from_text(self, text: str, use_multithreading: bool = True, make: bool = False) -> Tree:
         """Builds a golden tree from the input text, optionally using multithreading.
 
         Args:
@@ -268,8 +276,8 @@ class TreeBuilder:
         Returns:
             Tree: The golden tree structure.
         """
-        chunks = split_text(text, self.tokenizer, self.max_tokens)
-
+        chunks = split_text(text, self.tokenizer, self.max_tokens, make=make)
+        nodes_number = len(chunks)
         logging.info("Creating Leaf Nodes")
 
         if use_multithreading:
@@ -277,10 +285,11 @@ class TreeBuilder:
         else:
             leaf_nodes = {}
             for index, text in enumerate(chunks):
-                __, node = self.create_node(index, text)
+                __, node = self.create_node(index, text, nodes_number=nodes_number)
                 leaf_nodes[index] = node
 
         layer_to_nodes = {0: list(leaf_nodes.values())}
+        
 
         logging.info(f"Created {len(leaf_nodes)} Leaf Embeddings")
 
@@ -292,6 +301,9 @@ class TreeBuilder:
 
         tree = Tree(all_nodes, root_nodes, leaf_nodes, self.num_layers, layer_to_nodes)
 
+        print("computing nodes weights")
+        tree.compute_nodes_weights()
+        print("nodes weights computed")
         return tree
 
     @abstractclassmethod

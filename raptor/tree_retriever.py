@@ -1,7 +1,7 @@
 import logging
 import os
 from typing import Dict, List, Set
-
+import numpy as np
 import tiktoken
 from tenacity import retry, stop_after_attempt, wait_random_exponential
 
@@ -11,7 +11,8 @@ from .tree_structures import Node, Tree
 from .utils import (distances_from_embeddings, get_children, get_embeddings,
                     get_node_list, get_text,
                     indices_of_nearest_neighbors_from_distances,
-                    reverse_mapping)
+                    reverse_mapping,
+                    context_aware_distance)
 
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
@@ -176,8 +177,11 @@ class TreeRetriever(BaseRetriever):
         embeddings = get_embeddings(node_list, self.context_embedding_model)
 
         distances = distances_from_embeddings(query_embedding, embeddings)
-
+        # distances = context_aware_distance(np.array([distances]), self.tree.all_nodes)
+        print(distances)
         indices = indices_of_nearest_neighbors_from_distances(distances)
+
+        print("indices", indices)
 
         total_tokens = 0
         for idx in indices[:top_k]:
@@ -258,6 +262,7 @@ class TreeRetriever(BaseRetriever):
         max_tokens: int = 3500,
         collapse_tree: bool = True,
         return_layer_information: bool = False,
+        all_tree_nodes = None
     ) -> str:
         """
         Queries the tree and returns the most relevant information.

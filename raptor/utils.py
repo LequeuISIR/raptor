@@ -1,10 +1,12 @@
 import logging
 import re
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Optional
 
 import numpy as np
 import tiktoken
 from scipy import spatial
+import statistics
+from sklearn.metrics import pairwise_distances
 
 from .tree_structures import Node
 
@@ -20,7 +22,7 @@ def reverse_mapping(layer_to_nodes: Dict[int, List[Node]]) -> Dict[Node, int]:
 
 
 def split_text(
-    text: str, tokenizer: tiktoken.get_encoding("cl100k_base"), max_tokens: int, overlap: int = 0
+    text: str, tokenizer: tiktoken.get_encoding("cl100k_base"), max_tokens: int, overlap: int = 0, make: bool = False
 ):
     """
     Splits the input text into smaller chunks based on the tokenizer and maximum allowed tokens.
@@ -34,10 +36,22 @@ def split_text(
     Returns:
         List[str]: A list of text chunks.
     """
+
+    if make:
+        delimiters = ["\n"]
+        regex_pattern = "|".join(map(re.escape, delimiters))
+        sentences = re.split(regex_pattern, text)
+        stripped_sentences = [sent.strip() for sent in sentences if sent.strip() != ""]
+        # if overlap :
+        # stripped_sentences = [stripped_sentences[i-1] + stripped_sentences[i] for i in range(1, len(stripped_sentences)) ]
+        return stripped_sentences
+    
+
     # Split the text into sentences using multiple delimiters
     delimiters = [".", "!", "?", "\n"]
     regex_pattern = "|".join(map(re.escape, delimiters))
     sentences = re.split(regex_pattern, text)
+    
     
     # Calculate the number of tokens for each sentence
     n_tokens = [len(tokenizer.encode(" " + sentence)) for sentence in sentences]
@@ -206,3 +220,83 @@ def indices_of_nearest_neighbors_from_distances(distances: List[float]) -> np.nd
         np.ndarray: An array of indices sorted by ascending distance.
     """
     return np.argsort(distances)
+
+
+# def context_aware_distance(distance_matrix: np.ndarray, all_tree_nodes: Dict[int,Node], l: float = 0.5, aggregate: str = "mean") :
+#     context_aware_distance_matrix = distance_matrix.copy()
+#     for row in range(len(distance_matrix)) :
+#         for column in range(len(distance_matrix[0])) :
+#             context_nodes_id = all_tree_nodes[column].context_nodes # - {row}
+#             if aggregate == "mean" :
+#                 sum = 0
+#                 if len(context_nodes_id) != 0 :
+#                     for node_id in context_nodes_id :
+#                         sum += distance_matrix[row, node_id]
+#                     mean = sum/len(context_nodes_id)
+#                 else :
+#                     mean = 0
+#             context_aware_distance_matrix[row, column] = l*context_aware_distance_matrix[row, column] + (1-l)*mean 
+#     return context_aware_distance_matrix
+
+def context_aware_distance(distance_matrix: np.ndarray, all_tree_nodes: Dict[int,Node], l: float = 0.3, aggregate: str = "mean") :
+
+    context_aware_distance_matrix = distance_matrix.copy()
+    for row in range(len(distance_matrix)) :
+        for column in range(len(distance_matrix[0])) :
+            column_context_nodes_id = all_tree_nodes[column].context_nodes # - {row}
+            row_context_nodes_id = all_tree_nodes[column].context_nodes # - {row}
+            if aggregate == "mean" :
+                sum = 0
+                if len(column_context_nodes_id) != 0 :
+                    for column_context_node_id in column_context_nodes_id :
+                        sum += distance_matrix[row, column_context_node_id]
+                    
+                if len(row_context_nodes_id) != 0 :
+                        for row_context_node_id in row_context_nodes_id :
+                                sum += distance_matrix[column, row_context_node_id]
+
+                if sum != 0 : # it means one of the context nodes list is not empty
+                    mean = sum/(len(column_context_nodes_id) + len(row_context_nodes_id))
+                else :
+                    mean = 0
+            context_aware_distance_matrix[row, column] = l*context_aware_distance_matrix[row, column] + (1-l)*mean
+
+    return context_aware_distance_matrix
+
+# def context_aware_distance(node_1: Node, 
+#                            node_2: Node, 
+#                            distance_metric: str = "cosine", 
+#                            l: float = 0.5,
+#                            aggregate: str = "mean",
+#                            all_tree_node: Optional[Dict[int, Node]] = None) -> float:
+#     """
+#     Returns the distance from node_1 to node_2. It is not the same as the distance from node_2 to node_1.
+#     it calculates the distance of node_1.text to node_2.text, and the avg/(max?) of the distance of node_1.text to the context of node_2 .
+#     l is lambda: if l=1, only take into account the sentence. if l=0, only take into account the context.
+#     """
+#     distance_metrics = {
+#         "cosine": spatial.distance.cosine,
+#         "L1": spatial.distance.cityblock,
+#         "L2": spatial.distance.euclidean,
+#         "Linf": spatial.distance.chebyshev,
+#     }
+
+#     if distance_metric not in distance_metrics:
+#         raise ValueError(
+#             f"Unsupported distance metric '{distance_metric}'. Supported metrics are: {list(distance_metrics.keys())}"
+#         )
+
+#     # Distance between node_1 and node_2 texts
+#     text_distance = distance_metrics[distance_metric](node_1.embeddings["EMB"], node_2.embeddings["EMB"])
+    
+#     # Distance between node_1 atext and node_2 context
+#     embeddings =  [all_tree_node[id].embeddings["EMB"] for id in node_2.context_nodes]
+#     distances = [
+#         distance_metrics[distance_metric](node_1.embeddings["EMB"], embedding)
+#         for embedding in embeddings
+#     ]
+
+#     if aggregate == "mean" :
+#         context_distance = statistics.mean(distances)
+    
+#     return l*text_distance + (1-l)*context_distance

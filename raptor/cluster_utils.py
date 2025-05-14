@@ -1,19 +1,21 @@
 import logging
 import random
 from abc import ABC, abstractmethod
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 import numpy as np
 import tiktoken
 import umap
 from sklearn.mixture import GaussianMixture
+from sklearn.metrics import pairwise_distances
+
 
 # Initialize logging
 logging.basicConfig(format="%(asctime)s - %(message)s", level=logging.INFO)
 
 from .tree_structures import Node
 # Import necessary methods from other modules
-from .utils import get_embeddings
+from .utils import get_embeddings, context_aware_distance
 
 # Set a random seed for reproducibility
 RANDOM_SEED = 224
@@ -27,18 +29,39 @@ def global_cluster_embeddings(
     metric: str = "cosine",
 ) -> np.ndarray:
     if n_neighbors is None:
-        n_neighbors = int((len(embeddings) - 1) ** 0.5)
+        n_neighbors = max(2,int((len(embeddings) - 1) ** 0.5))
     reduced_embeddings = umap.UMAP(
         n_neighbors=n_neighbors, n_components=dim, metric=metric
     ).fit_transform(embeddings)
     return reduced_embeddings
 
+def context_aware_global_culster_embeddings(
+    embeddings: np.ndarray,
+    dim: int,
+    n_neighbors: Optional[int] = None,
+    all_tree_nodes: Optional[Dict[int,Node]] = None
+) ->  np.ndarray:
+    print("yay context aware distances")
+    distances = pairwise_distances(embeddings)
+    print("cosine distances", distances) 
+    context_aware_distances = context_aware_distance(distance_matrix=distances,
+                                                     all_tree_nodes=all_tree_nodes)
+    print("contexte aware cosine distances", context_aware_distances) 
+
+    if n_neighbors is None:
+        n_neighbors = max(2,int((len(embeddings) - 1) ** 0.5))
+
+    reduced_embeddings = umap.UMAP(
+        n_neighbors=n_neighbors, n_components=dim, metric="precomputed"
+    ).fit_transform(context_aware_distances)
+
+    return reduced_embeddings
 
 def local_cluster_embeddings(
     embeddings: np.ndarray, dim: int, num_neighbors: int = 10, metric: str = "cosine"
 ) -> np.ndarray:
     reduced_embeddings = umap.UMAP(
-        n_neighbors=num_neighbors, n_components=dim, metric=metric
+        n_neighbors=num_neighbors, n_components=max(dim, 1) , metric=metric
     ).fit_transform(embeddings)
     return reduced_embeddings
 
@@ -66,10 +89,20 @@ def GMM_cluster(embeddings: np.ndarray, threshold: float, random_state: int = 0)
     return labels, n_clusters
 
 
+
 def perform_clustering(
-    embeddings: np.ndarray, dim: int, threshold: float, verbose: bool = False
+    embeddings: np.ndarray, dim: int, threshold: float, verbose: bool = False, all_tree_nodes: Optional[Dict[int, Node]] = None
 ) -> List[np.ndarray]:
-    reduced_embeddings_global = global_cluster_embeddings(embeddings, min(dim, len(embeddings) -2))
+    # print("hmmmmmm", dim, len(embeddings))
+    # umap the embeddings 
+    if all_tree_nodes :
+        reduced_embeddings_global = context_aware_global_culster_embeddings(embeddings=embeddings, 
+                                                                        dim=max(1,min(dim, len(embeddings) -2)),
+                                                                        all_tree_nodes=all_tree_nodes)
+    else :
+        reduced_embeddings_global = global_cluster_embeddings(embeddings, max(1,min(dim, len(embeddings) -2)))
+    
+    # make the clusters
     global_clusters, n_global_clusters = GMM_cluster(
         reduced_embeddings_global, threshold
     )
@@ -138,13 +171,14 @@ class RAPTOR_Clustering(ClusteringAlgorithm):
         reduction_dimension: int = 10,
         threshold: float = 0.1,
         verbose: bool = False,
+        all_tree_nodes: Optional[Dict[int, Node]] = None 
     ) -> List[List[Node]]:
         # Get the embeddings from the nodes
         embeddings = np.array([node.embeddings[embedding_model_name] for node in nodes])
-
+        print("len embeddings raptor clustering", len(embeddings))
         # Perform the clustering
         clusters = perform_clustering(
-            embeddings, dim=reduction_dimension, threshold=threshold
+            embeddings, dim=reduction_dimension, threshold=threshold, all_tree_nodes = all_tree_nodes
         )
 
         # Initialize an empty list to store the clusters of nodes

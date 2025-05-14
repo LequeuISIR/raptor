@@ -73,9 +73,11 @@ class ClusterTreeBuilder(TreeBuilder):
                 max_tokens=summarization_length,
             )
 
-            logging.info(
-                f"Node Texts Length: {len(self.tokenizer.encode(node_texts))}, Summarized Text Length: {len(self.tokenizer.encode(summarized_text))}"
-            )
+            print("summarized text", summarized_text)
+
+            # logging.info(
+            #     f"Node Texts Length: {len(self.tokenizer.encode(node_texts))}, Summarized Text Length: {len(self.tokenizer.encode(summarized_text))}"
+            # )
 
             __, new_parent_node = self.create_node(
                 next_node_index, summarized_text, {node.index for node in cluster}
@@ -91,20 +93,32 @@ class ClusterTreeBuilder(TreeBuilder):
             logging.info(f"Constructing Layer {layer}")
 
             node_list_current_layer = get_node_list(current_level_nodes)
-
+            # print("node list current layer", node_list_current_layer, len(node_list_current_layer))
             if len(node_list_current_layer) <= self.reduction_dimension + 1:
                 self.num_layers = layer
                 logging.info(
                     f"Stopping Layer construction: Cannot Create More Layers. Total Layers in tree: {layer}"
                 )
                 break
-
-            clusters = self.clustering_algorithm.perform_clustering(
-                node_list_current_layer,
-                self.cluster_embedding_model,
-                reduction_dimension=self.reduction_dimension,
-                **self.clustering_params,
-            )
+            
+            if layer == 0 :
+                #only use context if its the first layer
+                clusters = self.clustering_algorithm.perform_clustering(
+                    node_list_current_layer,
+                    self.cluster_embedding_model,
+                    reduction_dimension=self.reduction_dimension,
+                    all_tree_nodes = all_tree_nodes,
+                    **self.clustering_params,
+                )
+            
+            else :
+                clusters = self.clustering_algorithm.perform_clustering(
+                    node_list_current_layer,
+                    self.cluster_embedding_model,
+                    reduction_dimension=self.reduction_dimension,
+                    all_tree_nodes = None,
+                    **self.clustering_params,
+                )
 
             lock = Lock()
 
